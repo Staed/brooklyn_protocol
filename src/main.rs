@@ -1,12 +1,8 @@
-use std::net::{SocketAddr, UdpSocket};
+#![allow(dead_code)]
 use std::io;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-enum Message {
-    Login(String),
-    Logout(String)
-}
+use std::net::{SocketAddr, UdpSocket};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Clone)]
 struct Blockchain {
@@ -15,83 +11,69 @@ struct Blockchain {
 
 impl Blockchain {
     fn new(nonce: u64) -> Self {
-        Self { nonce: nonce, }
+        Self { nonce }
     }
 
-    fn authenticate(&self, message: &[u8]) -> bool {
+    fn authenticate(&self, _message: String) -> bool {
         true
     }
 }
 
 struct Node {
-    id: u64,
-    addr: SocketAddr,
+    peer_addrs: SocketAddr,
+    socket: UdpSocket,
     blockchain: Blockchain,
 }
 
 impl Node {
-    fn new(id: u64, addr: SocketAddr, blockchain: Blockchain) -> Self {
-        Node { id, addr, blockchain }
+    pub fn new(peer_addrs: SocketAddr, self_addr: SocketAddr, blockchain: Blockchain) -> io::Result<Node> {
+        let socket = UdpSocket::bind(self_addr)?;
+        Ok(Node { peer_addrs, socket, blockchain })
     }
 
-    fn send_message(&self, message: Message) -> io::Result<()> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_nonblocking(true)?;
-        let serialized_message = serde_json::to_string(&message).unwrap();
-        socket.send_to(serialized_message.as_bytes(), &self.addr)?;
-        Ok(())
+    pub fn send_message(&self, message: &[u8]) -> io::Result<usize> {
+        let size = self.socket.send_to(message, self.peer_addrs);
+        eprintln!("Sent {} bytes to {}", message.len(), self.peer_addrs);
+        return size
     }
 
-    fn receive_message(&self) -> io::Result<Option<Message>> {
-        let socket = UdpSocket::bind(self.addr)?;
-        socket.set_nonblocking(true)?;
+    pub fn poll_messages(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        loop {
+            match self.socket.recv_from(buf) {
+                Ok((size, peer_addr)) => {
+                    let msg = String::from_utf8_lossy(&buf[..size]).to_string();
 
-        let mut buffer = [0u8, 255];
-        match socket.recv_from(&mut buffer) {
-            Ok((bytes_read, _)) => {
-                let message = &buffer[..bytes_read];
-                if self.blockchain.authenticate(message) {
-                    let deserialized_message: Message = serde_json::from_slice(message).unwrap();
-                    Ok(Some(deserialized_message))
-                } else {
-                    println!("Received an invalid message from {}", self.addr);
-                    Ok(None)
+                    if self.blockchain.authenticate(msg.clone()) {
+                        eprintln!("Received from {}: {}", peer_addr, &msg);
+                    } else {
+                        eprintln!("Received any invalid message from {}", peer_addr);
+                    }
+                    return Ok((size, peer_addr));
                 }
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                Ok(None)
-            }
-            Err(e) => {
-                Err(e)
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                Err(err) => return Err(err),
             }
         }
     }
 }
 
 fn main() -> io::Result<()> {
-    let blockchain: Blockchain = Blockchain::new(835);
-    let node1_address: SocketAddr = "127.0.0.1:9001".parse().unwrap();
-    let node2_address: SocketAddr = "127.0.0.1:9002".parse().unwrap();
+    let node1_addr = "127.0.0.1:9000".parse().unwrap();
+    let node2_addr = "127.0.0.1:9001".parse().unwrap();
+    let blockchain = Blockchain::new(835);
 
-    let node1 = Node::new(1, node2_address, blockchain.clone());
-    let node2 = Node::new(2, node1_address, blockchain.clone());
 
-    let message = Message::Login("Hello world".to_owned());
-    node1.send_message(message.clone())?;
+    let node1 = Node::new(node2_addr, node1_addr, blockchain.clone())?;
+    let node2 = Node::new(node1_addr, node2_addr, blockchain.clone())?;
 
-    loop {
-        if let Some(received_message) = node2.receive_message()? {
-            match received_message {
-                Message::Login(text) => {
-                    println!("Received login message: {}", text);
-                }
-                Message::Logout(text) => {
-                    println!("Received logout message: {}", text);
-                }
-            }
-            break;
-        }
-    }
+    thread::sleep(Duration::from_secs(1));
+    let message = "Hello world".as_bytes();
+    node1.send_message(message)?;
+
+    let mut buffer = [0u8; 1024];
+    let (size, addr) = node2.poll_messages(&mut buffer)?;
+
+    println!("Node2 received {} bytes from {}: {:?}", size, addr, &buffer[..size]);
 
     Ok(())
 }
