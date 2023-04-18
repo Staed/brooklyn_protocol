@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
+use tokio::net::UdpSocket;
 use std::thread;
 use std::time::Duration;
 
@@ -26,52 +27,48 @@ struct Node {
 }
 
 impl Node {
-    pub fn new(peer_addrs: SocketAddr, self_addr: SocketAddr, blockchain: Blockchain) -> io::Result<Node> {
-        let socket = UdpSocket::bind(self_addr)?;
+    pub async fn new(peer_addrs: SocketAddr, self_addr: SocketAddr, blockchain: Blockchain) -> io::Result<Node> {
+        let socket = UdpSocket::bind(self_addr).await?;
         Ok(Node { peer_addrs, socket, blockchain })
     }
 
-    pub fn send_message(&self, message: &[u8]) -> io::Result<usize> {
-        let size = self.socket.send_to(message, self.peer_addrs);
+    pub async fn send_message(&self, message: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
+        let size = self.socket.send_to(message, self.peer_addrs).await?;
         eprintln!("Sent {} bytes to {}", message.len(), self.peer_addrs);
-        return size
+        Ok(size)
     }
 
-    pub fn poll_messages(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+    pub async fn poll_messages(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
         loop {
-            match self.socket.recv_from(buf) {
-                Ok((size, peer_addr)) => {
-                    let msg = String::from_utf8_lossy(&buf[..size]).to_string();
+            let (size, peer_addr) = self.socket.recv_from(buf).await?;
+            let msg = String::from_utf8_lossy(&buf[..size]).to_string();
 
-                    if self.blockchain.authenticate(msg.clone()) {
-                        eprintln!("Received from {}: {}", peer_addr, &msg);
-                    } else {
-                        eprintln!("Received any invalid message from {}", peer_addr);
-                    }
-                    return Ok((size, peer_addr));
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(err) => return Err(err),
+            if self.blockchain.authenticate(msg.clone()) {
+                eprintln!("Received from {}: {}", peer_addr, &msg);
+            } else {
+                eprintln!("Received any invalid message from {}", peer_addr);
             }
+            return Ok((size, peer_addr));
         }
     }
 }
 
-fn main() -> io::Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node1_addr = "127.0.0.1:9000".parse().unwrap();
     let node2_addr = "127.0.0.1:9001".parse().unwrap();
     let blockchain = Blockchain::new(835);
 
 
-    let node1 = Node::new(node2_addr, node1_addr, blockchain.clone())?;
-    let node2 = Node::new(node1_addr, node2_addr, blockchain.clone())?;
+    let node1 = Node::new(node2_addr, node1_addr, blockchain.clone()).await?;
+    let node2 = Node::new(node1_addr, node2_addr, blockchain.clone()).await?;
 
     thread::sleep(Duration::from_secs(1));
     let message = "Hello world".as_bytes();
-    node1.send_message(message)?;
+    node1.send_message(message).await?;
 
     let mut buffer = [0u8; 1024];
-    let (size, addr) = node2.poll_messages(&mut buffer)?;
+    let (size, addr) = node2.poll_messages(&mut buffer).await?;
 
     println!("Node2 received {} bytes from {}: {:?}", size, addr, &buffer[..size]);
 
