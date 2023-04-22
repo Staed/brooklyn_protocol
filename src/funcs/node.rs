@@ -2,7 +2,13 @@ use std::io;
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 use tokio::task;
+use futures::StreamExt;
+use futures::stream::iter;
 use std::sync::Arc;
+use num_cpus;
+use log;
+
+use std::time::Instant;
 
 #[path = "blockchain.rs"]
 pub mod blockchain;
@@ -21,29 +27,43 @@ impl Node {
         let socket = Arc::new(UdpSocket::bind(self_addr).await?);
         Ok(Node { peer_addrs, socket, blockchain, cur_leader_idx })
     }
+
     pub fn add_peer(&mut self, new_addr: SocketAddr) {
         // TODO Check for isize::MAX panic
         self.peer_addrs.push(new_addr.clone())
     }
+
     // TODO Ping every X time and remove peer from peer_addrs if no response
-    pub async fn broadcast_message(&mut self, message: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
-        // TODO Parallelize this
-        let mut total_sent = 0;
-        for addr in self.peer_addrs.iter() {
-            let size = self.socket.send_to(message, addr).await?;
-            eprintln!("Sent {} bytes to {}", message.len(), addr);
-            total_sent += size;
-        }
+    pub async fn broadcast_message(&mut self, message: Vec<u8>) -> Result<usize, Box<dyn std::error::Error>> {
+        let start = Instant::now();
 
-        // Rotate leader after broadcasting
-        if self.cur_leader_idx < self.peer_addrs.len() {
-            self.cur_leader_idx += 1
-        } else {
-            self.cur_leader_idx = 0;
-        }
+        let total_sent = iter(&self.peer_addrs)
+            .map(|&addr| {
+                let socket = Arc::clone(&self.socket);
+                let msg = message.as_slice();
+                async move { match socket.try_send_to(msg, addr) {
+                    Ok(sent) => Ok(sent),
+                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        log::warn!("UDP socket buffer is full; failed to send a message to {}: {}", addr, err);
+                        Ok(0)
+                    },
+                    Err(err) => {
+                        log::error!("Failed to send a message to to {}: {}", addr, err);
+                        Err(err)
+                    }
+                }}
+            })
+            .buffer_unordered(num_cpus::get())
+            .fold(0, |acc, sent| async move { acc + sent.unwrap_or(0) })
+            .await;
 
+        let duration = start.elapsed();
+        println!("Elapsed time in broadcast after sending {:?}: {:?}", String::from_utf8(message), duration);
+
+        self.cur_leader_idx = (self.cur_leader_idx + 1) % self.peer_addrs.len();
         Ok(total_sent)
     }
+
     pub async fn poll_messages(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
         loop {
             let (size, peer_addr) = self.socket.recv_from(buf).await?;
