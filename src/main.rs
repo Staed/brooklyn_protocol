@@ -28,7 +28,7 @@ async fn generate_nodes(base_addr: &str, base_port: i32, blockchain: Blockchain,
 
             return Node::new(peers, addr, blockchain_tmp, 0).await;
         }
-        })
+    })
     .collect::<Vec<_>>();
 
     return futures::future::try_join_all(nodes_futures).await.unwrap();
@@ -38,7 +38,7 @@ async fn generate_nodes(base_addr: &str, base_port: i32, blockchain: Blockchain,
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_addr = "127.0.0.1:";
     let base_port = 9000;
-    let blockchain: Blockchain = Blockchain::new(835);
+    let blockchain: Blockchain = Blockchain::new();
     let n = 5;
 
     let mut nodes: Vec<Node> = generate_nodes(base_addr, base_port, blockchain, n).await;

@@ -28,7 +28,7 @@ impl Node {
         Ok(Node { peer_addrs, socket, blockchain, cur_leader_idx })
     }
 
-    pub fn add_peer(&mut self, new_addr: SocketAddr) {
+    pub fn _add_peer(&mut self, new_addr: SocketAddr) {
         // TODO Check for isize::MAX panic
         self.peer_addrs.push(new_addr.clone())
     }
@@ -64,7 +64,7 @@ impl Node {
         Ok(total_sent)
     }
 
-    pub async fn poll_messages(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
+    pub async fn _poll_messages(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
         loop {
             let (size, peer_addr) = self.socket.recv_from(buf).await?;
             let msg = String::from_utf8_lossy(&buf[..size]).to_string();
