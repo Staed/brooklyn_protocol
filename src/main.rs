@@ -3,6 +3,7 @@ use std::thread;
 use std::time::Duration;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
+use futures::future::try_join_all;
 
 mod funcs;
 use funcs::node::Node;
@@ -46,11 +47,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::sleep(Duration::from_millis(500));
 
     println!("Node1 will begin broadcasting to its peers which number {}", n-1);
-    let node1 = &mut nodes[0];
     for _ in std::iter::repeat(()).take(5) {
-        node1.broadcast_message(generate_random_message()).await?;
+        nodes[0].broadcast_message(generate_random_message()).await?;
 
-        thread::sleep(Duration::from_millis(250));
+        let mut response_futures = Vec::with_capacity(nodes.len());
+        for node in nodes.iter_mut() {
+            response_futures.push(node.poll_messages());
+        }
+        let results = try_join_all(response_futures).await.unwrap();
+        for (idx, (size, addr)) in results.iter().enumerate() {
+            println!("Node {} received {} bytes from {}", idx+1, size, addr);
+        }
+        println!();
     }
 
     Ok(())

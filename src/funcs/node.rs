@@ -64,10 +64,11 @@ impl Node {
         Ok(total_sent)
     }
 
-    pub async fn _poll_messages(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
+    pub async fn poll_messages(&mut self) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
         loop {
-            let (size, peer_addr) = self.socket.recv_from(buf).await?;
-            let msg = String::from_utf8_lossy(&buf[..size]).to_string();
+            let mut buffer = vec![0u8; 1024];
+            let (size, peer_addr) = self.socket.recv_from(&mut buffer).await?;
+            let msg = String::from_utf8_lossy(&buffer[..size]).to_string();
 
             if msg == "Ok" {
                 return Ok((0, peer_addr));
