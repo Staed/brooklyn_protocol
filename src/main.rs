@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut response_futures = Vec::with_capacity(nodes.len());
         for node in nodes.iter_mut() {
-            response_futures.push(node.poll_messages());
+            response_futures.push(node.fetch_messages());
         }
         let results = try_join_all(response_futures).await.unwrap();
         for (idx, (size, addr)) in results.iter().enumerate() {

@@ -64,32 +64,31 @@ impl Node {
         Ok(total_sent)
     }
 
-    pub async fn poll_messages(&mut self) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
-        loop {
-            let mut buffer = vec![0u8; 1024];
-            let (size, peer_addr) = self.socket.recv_from(&mut buffer).await?;
-            let msg = String::from_utf8_lossy(&buffer[..size]).to_string();
+    pub async fn fetch_messages(&mut self) -> Result<(usize, SocketAddr), Box <dyn std::error::Error>> {
+        let mut buffer = vec![0u8; 1024];
+        let (size, peer_addr) = self.socket.recv_from(&mut buffer).await?;
+        let msg = String::from_utf8_lossy(&buffer[..size]).to_string();
 
-            if msg == "Ok" {
-                return Ok((0, peer_addr));
-            }
-
-            if self.blockchain.authenticate(msg.clone()) {
-                eprintln!("Received from {}: {}", peer_addr, &msg);
-
-                self.acknowledge(peer_addr.clone());
-            } else {
-                eprintln!("Received an invalid message from {}", peer_addr);
-            }
-            return Ok((size, peer_addr));
+        if msg == "Ok" {
+            return Ok((0, peer_addr));
         }
+
+        if self.blockchain.authenticate(&msg) {
+            eprintln!("Received from {}: {}", peer_addr, msg);
+
+            self.acknowledge(&peer_addr);
+        } else {
+            eprintln!("Received an invalid message from {}", peer_addr);
+        }
+        return Ok((size, peer_addr));
     }
 
     // Use to confirm the hash + leader information received via broadcast looks good
-    fn acknowledge(&self, original_sender: SocketAddr) -> () {
+    fn acknowledge(&self, original_sender: &SocketAddr) -> () {
         let sock = Arc::clone(&self.socket);
+        let target = original_sender.clone();
         task::spawn(async move {
-            let _ = sock.send_to("Ok".as_bytes(), original_sender).await;
+            let _ = sock.send_to("Ok".as_bytes(), target).await;
         });
     }
 }

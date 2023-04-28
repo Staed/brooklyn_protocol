@@ -14,7 +14,7 @@ impl Blockchain {
     pub fn new() -> Self {
         Blockchain { blocks: Vec::new(), pending_actions: Vec::new() }
     }
-    pub fn authenticate(&self, _message: String) -> bool {
+    pub fn authenticate(&self, _message: &String) -> bool {
         true
     }
 
